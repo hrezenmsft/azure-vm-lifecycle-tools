@@ -27,7 +27,8 @@ displays a numbered menu of storage accounts in the selected scope.
 
 .PARAMETER ContainerName
 One or more container names to scan. When omitted, all containers in the
-storage account are scanned.
+storage account are scanned. Supplying names avoids account-wide container
+discovery and supports Blob data roles scoped to those containers.
 
 .PARAMETER TargetTier
 Online access tier to request: Hot or Cool. The default is Hot.
@@ -77,6 +78,10 @@ confirmation. High priority has additional cost.
 
 .NOTES
 Author: Henrique Rezende
+
+The client must be permitted by the storage account firewall, virtual network
+rules, or private endpoint configuration. Owner and Contributor management
+roles do not grant blob data access.
 
 .LINK
 https://github.com/hrezenmsft/azure-vm-lifecycle-tools
@@ -180,6 +185,48 @@ function Connect-AzBrowserAccount {
     Connect-AzAccount -Tenant $Tenant -Subscription $Subscription -ErrorAction Stop | Out-Null
 }
 
+function New-StorageDataAccessError {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Identity,
+
+        [Parameter(Mandatory)]
+        [string]$StorageAccount,
+
+        [Parameter(Mandatory)]
+        [string]$ResourceGroup,
+
+        [Parameter(Mandatory)]
+        [string]$RoleScope,
+
+        [Parameter(Mandatory)]
+        [string]$PublicNetworkAccess,
+
+        [Parameter(Mandatory)]
+        [string]$NetworkDefaultAction,
+
+        [Parameter(Mandatory)]
+        [string]$OriginalError
+    )
+
+    return @"
+Azure denied blob data access for '$Identity' on storage account '$StorageAccount'.
+
+Check both controls below:
+1. Azure RBAC: assign 'Storage Blob Data Contributor' at this scope or a parent scope:
+   $RoleScope
+   Management-plane roles such as Owner or Contributor do not grant blob data access. New role assignments can take up to 10 minutes to propagate.
+2. Storage networking: PublicNetworkAccess=$PublicNetworkAccess; NetworkRuleSet.DefaultAction=$NetworkDefaultAction.
+   If public access is disabled or the default action is Deny, run from an allowed IP/VNet or a network that can resolve and reach the private endpoint.
+
+Review access:
+az role assignment list --assignee "$Identity" --scope "$RoleScope" --include-inherited --output table
+az storage account show --name "$StorageAccount" --resource-group "$ResourceGroup" --query "{publicNetworkAccess:publicNetworkAccess,defaultAction:networkRuleSet.defaultAction}" --output table
+
+Original error: $OriginalError
+"@
+}
+
 $requiredCommands = @(
     "az",
     "Connect-AzAccount",
@@ -265,24 +312,39 @@ else {
 $StorageAccountName = [string]$selectedStorageAccount.StorageAccountName
 $ResourceGroupName = [string]$selectedStorageAccount.ResourceGroupName
 $storageContext = New-AzStorageContext -StorageAccountName $StorageAccountName -UseConnectedAccount -ErrorAction Stop
-
-$availableContainers = @(Get-AzStorageContainer -Context $storageContext -ErrorAction Stop | Sort-Object Name)
-if ($availableContainers.Count -eq 0) {
-    Write-Host "No blob containers were found in storage account '$StorageAccountName'." -ForegroundColor Yellow
-    return
-}
+$storageAccountScope = [string]$selectedStorageAccount.Id
+$publicNetworkAccess = [string]$selectedStorageAccount.PublicNetworkAccess
+$networkDefaultAction = [string]$selectedStorageAccount.NetworkRuleSet.DefaultAction
+$signedInIdentity = [string]$azAccount.user.name
 
 if ($null -eq $ContainerName -or $ContainerName.Count -eq 0) {
+    try {
+        $availableContainers = @(Get-AzStorageContainer -Context $storageContext -ErrorAction Stop | Sort-Object Name)
+    }
+    catch {
+        $errorText = ($_ | Out-String).Trim()
+        if ($errorText -match "(?i)403|AuthorizationFailure|not authorized") {
+            throw (New-StorageDataAccessError -Identity $signedInIdentity -StorageAccount $StorageAccountName -ResourceGroup $ResourceGroupName -RoleScope $storageAccountScope -PublicNetworkAccess $publicNetworkAccess -NetworkDefaultAction $networkDefaultAction -OriginalError $_.Exception.Message)
+        }
+        throw
+    }
+    if ($availableContainers.Count -eq 0) {
+        Write-Host "No blob containers were found in storage account '$StorageAccountName'." -ForegroundColor Yellow
+        return
+    }
     $selectedContainers = $availableContainers
 }
 else {
-    $selectedContainers = @()
-    foreach ($requestedContainerName in $ContainerName) {
-        $matchingContainer = $availableContainers | Where-Object Name -CEQ $requestedContainerName | Select-Object -First 1
-        if ($null -eq $matchingContainer) {
-            throw "Container '$requestedContainerName' was not found in storage account '$StorageAccountName'."
+    $selectedContainers = @($ContainerName | Sort-Object -Unique | ForEach-Object {
+        [PSCustomObject]@{ Name = $_ }
+    })
+    if ($selectedContainers.Count -ne $ContainerName.Count) {
+        Write-Verbose "Duplicate container names were removed."
+    }
+    foreach ($container in $selectedContainers) {
+        if ([string]::IsNullOrWhiteSpace($container.Name)) {
+            throw "ContainerName cannot contain an empty value."
         }
-        $selectedContainers += $matchingContainer
     }
 }
 
@@ -294,7 +356,17 @@ foreach ($container in $selectedContainers) {
     $continuationToken = $null
     Write-Host "Scanning container '$($container.Name)'..." -ForegroundColor Cyan
     do {
-        $blobs = @(Get-AzStorageBlob -Container $container.Name -MaxCount $BatchSize -ContinuationToken $continuationToken -Context $storageContext -ErrorAction Stop)
+        try {
+            $blobs = @(Get-AzStorageBlob -Container $container.Name -MaxCount $BatchSize -ContinuationToken $continuationToken -Context $storageContext -ErrorAction Stop)
+        }
+        catch {
+            $errorText = ($_ | Out-String).Trim()
+            if ($errorText -match "(?i)403|AuthorizationFailure|not authorized") {
+                $containerScope = "$storageAccountScope/blobServices/default/containers/$($container.Name)"
+                throw (New-StorageDataAccessError -Identity $signedInIdentity -StorageAccount $StorageAccountName -ResourceGroup $ResourceGroupName -RoleScope $containerScope -PublicNetworkAccess $publicNetworkAccess -NetworkDefaultAction $networkDefaultAction -OriginalError $_.Exception.Message)
+            }
+            throw
+        }
         if ($blobs.Count -eq 0) {
             break
         }

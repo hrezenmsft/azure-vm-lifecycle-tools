@@ -115,7 +115,8 @@ Get-Help .\Import-AzVhdToManagedDisk.ps1 -Full
 
 - Az PowerShell modules: `Az.Accounts` and `Az.Storage`.
 - Management-plane read access to discover storage accounts.
-- `Storage Blob Data Contributor` or equivalent data-plane permissions on the target storage account.
+- `Storage Blob Data Contributor` or equivalent data-plane permissions on the target storage account or selected containers.
+- Network access permitted by the storage firewall, virtual network rules, or private endpoint configuration.
 - A standard general-purpose v2 or Blob Storage account containing archived base blobs.
 
 ```powershell
@@ -152,7 +153,9 @@ Rehydrate one container to Cool with Standard priority:
     -RehydratePriority Standard
 ```
 
-Use `-ContainerName container1,container2` to limit scanning to multiple containers, `-BatchSize` to control enumeration page size, and `-MaxBlobCount` to cap eligible blobs in one run. Blobs already showing a pending rehydration status are skipped.
+Use `-ContainerName container1,container2` to limit scanning to multiple containers, `-BatchSize` to control enumeration page size, and `-MaxBlobCount` to cap eligible blobs in one run. Blobs already showing a pending rehydration status are skipped. Supplying `-ContainerName` also supports least-privilege role assignments scoped to those containers because the script does not attempt account-wide container discovery. Omitting it requires permission to list containers at storage-account scope.
+
+An Azure Storage 403 can be caused by either data-plane RBAC or storage networking. Management roles such as Owner or Contributor do not grant blob access; use `Storage Blob Data Contributor`. Storage accounts with public access disabled or a default network action of `Deny` must be reached from an allowed IP/VNet or through a correctly resolved private endpoint. Role assignments can take up to 10 minutes to propagate. The script reports the relevant RBAC scope, network settings, and diagnostic commands when access is denied.
 
 The script uses Microsoft Entra ID for blob enumeration and Azure CLI `--auth-mode login` for tier changes. It does not retrieve account keys or enable shared-key access. Each container has its own continuation-token sequence, so large accounts are paginated correctly.
 
