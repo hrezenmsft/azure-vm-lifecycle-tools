@@ -4,7 +4,7 @@
 
 The sample scripts are not supported under any Microsoft standard support program or service. They are provided AS IS without warranty of any kind. The entire risk arising from their use or performance remains with you.
 
-PowerShell tools for importing fixed VHD and VHDX files into Azure managed disks and creating specialized or generalized Windows VM clones at a different size.
+PowerShell tools for Azure VM lifecycle operations and archived blob rehydration.
 
 ## Choose a tool
 
@@ -12,8 +12,9 @@ PowerShell tools for importing fixed VHD and VHDX files into Azure managed disks
 | --- | --- |
 | `Import-AzVhdToManagedDisk.ps1` | Upload a local fixed-size VHD or VHDX into a new Azure managed disk. |
 | `Copy-AzVmWithNewSize.ps1` | Clone selected VMs in a resource group using a different VM size. |
+| `Start-AzBlobRehydration.ps1` | Rehydrate archived blobs to the Hot or Cool access tier. |
 
-Both scripts support `-WhatIf` and confirmation prompts because they create billable Azure resources.
+All scripts support `-WhatIf` and confirmation prompts because they create resources or submit billable operations.
 
 ## Shared requirements
 
@@ -104,6 +105,46 @@ The upload SAS is held in process memory and revoked in a `finally` block. If re
 
 ```powershell
 Get-Help .\Import-AzVhdToManagedDisk.ps1 -Full
+```
+
+## Rehydrate archived blobs
+
+### Additional requirements
+
+- Az PowerShell modules: `Az.Accounts` and `Az.Storage`.
+- Management-plane read access to discover storage accounts.
+- `Storage Blob Data Contributor` or equivalent data-plane permissions on the target storage account.
+- A standard general-purpose v2 or Blob Storage account containing archived base blobs.
+
+```powershell
+Install-Module Az.Accounts, Az.Storage -Scope CurrentUser
+```
+
+Preview every eligible archived blob in a selected storage account:
+
+```powershell
+.\Start-AzBlobRehydration.ps1 -WhatIf
+```
+
+Rehydrate one container to Cool with Standard priority:
+
+```powershell
+.\Start-AzBlobRehydration.ps1 `
+    -ResourceGroupName archive-rg `
+    -StorageAccountName archivestore01 `
+    -ContainerName backups `
+    -TargetTier Cool `
+    -RehydratePriority Standard
+```
+
+Use `-ContainerName container1,container2` to limit scanning to multiple containers, `-BatchSize` to control enumeration page size, and `-MaxBlobCount` to cap eligible blobs in one run. Blobs already showing a pending rehydration status are skipped.
+
+The script uses Microsoft Entra ID for blob enumeration and Azure CLI `--auth-mode login` for tier changes. It does not retrieve account keys or enable shared-key access. Each container has its own continuation-token sequence, so large accounts are paginated correctly.
+
+Changing an archived blob to Hot or Cool can incur retrieval, transaction, online storage, and early deletion charges. Standard priority may take up to 15 hours for smaller blobs under ideal conditions. High priority costs more and should be reserved for urgent restores. Azure processes accepted requests asynchronously, and tier changes cannot be canceled after submission. Review [Microsoft's blob rehydration guidance](https://learn.microsoft.com/azure/storage/blobs/archive-rehydrate-overview) before running the script.
+
+```powershell
+Get-Help .\Start-AzBlobRehydration.ps1 -Full
 ```
 
 ## Clone VMs at a new size
