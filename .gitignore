@@ -1,0 +1,10 @@
+# Generated logs and local diagnostics
+*.csv
+*.log
+*.tmp
+*.clixml
+
+# Editor and operating-system files
+.vscode/
+.DS_Store
+Thumbs.db
