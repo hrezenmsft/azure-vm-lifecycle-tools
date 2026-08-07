@@ -58,8 +58,8 @@ request without changing blob tiers.
 .EXAMPLE
 .\Start-AzBlobRehydration.ps1 -SubscriptionId 00000000-0000-0000-0000-000000000000 -TenantId 11111111-1111-1111-1111-111111111111 -WhatIf
 
-Uses tenant-scoped device-code authentication when an Azure session is invalid,
-then previews eligible blobs in the selected subscription.
+Requires an existing tenant-scoped Azure CLI session, then previews eligible
+blobs in the selected subscription.
 
 .EXAMPLE
 .\Start-AzBlobRehydration.ps1 -ResourceGroupName archive-rg -StorageAccountName archivestore01 -ContainerName backups -TargetTier Cool -RehydratePriority Standard
@@ -164,11 +164,25 @@ function Format-ByteSize {
     return "$Bytes bytes"
 }
 
+function Connect-AzBrowserAccount {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Tenant,
+
+        [Parameter(Mandatory)]
+        [string]$Subscription
+    )
+
+    Update-AzConfig -EnableLoginByWam $false -Scope Process -ErrorAction Stop | Out-Null
+    Connect-AzAccount -Tenant $Tenant -Subscription $Subscription -ErrorAction Stop | Out-Null
+}
+
 $requiredCommands = @(
     "az",
     "Connect-AzAccount",
     "Get-AzContext",
     "Set-AzContext",
+    "Update-AzConfig",
     "Get-AzStorageAccount",
     "New-AzStorageContext",
     "Get-AzStorageContainer",
@@ -186,19 +200,8 @@ if (-not [string]::IsNullOrWhiteSpace($SubscriptionId)) {
 }
 $null = & az @tokenCheckArguments 2>$null
 if ($LASTEXITCODE -ne 0) {
-    Write-Host "No valid Azure CLI session was found. Starting device-code login..." -ForegroundColor Yellow
-    $loginArguments = @("login", "--use-device-code")
-    if (-not [string]::IsNullOrWhiteSpace($TenantId)) {
-        $loginArguments += @("--tenant", $TenantId)
-    }
-    if (-not [string]::IsNullOrWhiteSpace($SubscriptionId) -and -not [string]::IsNullOrWhiteSpace($TenantId)) {
-        $loginArguments += @("--subscription", $SubscriptionId)
-    }
-    & az @loginArguments
-    if ($LASTEXITCODE -ne 0) {
-        $tenantGuidance = if ([string]::IsNullOrWhiteSpace($TenantId)) { " Specify -TenantId to limit login to the tenant containing the subscription." } else { "" }
-        throw "Azure CLI device-code login failed.$tenantGuidance"
-    }
+    $loginCommand = if ([string]::IsNullOrWhiteSpace($TenantId)) { "az login" } else { "az login --tenant `"$TenantId`"" }
+    throw "No valid Azure CLI session was found. Run '$loginCommand', select the required subscription, and then run this script again."
 }
 
 if (-not [string]::IsNullOrWhiteSpace($SubscriptionId)) {
@@ -218,16 +221,16 @@ $activeTenantId = [string]$azAccount.tenantId
 
 $azPowerShellContext = Get-AzContext -ErrorAction SilentlyContinue
 if ($null -eq $azPowerShellContext -or $null -eq $azPowerShellContext.Account -or [string]$azPowerShellContext.Tenant.Id -ine $activeTenantId) {
-    Write-Host "No matching Az PowerShell session was found. Starting device-code login..." -ForegroundColor Yellow
-    Connect-AzAccount -Tenant $activeTenantId -Subscription $subscriptionId -UseDeviceAuthentication -ErrorAction Stop | Out-Null
+    Write-Host "No matching Az PowerShell session was found. Starting browser login with WAM disabled for this process..." -ForegroundColor Yellow
+    Connect-AzBrowserAccount -Tenant $activeTenantId -Subscription $subscriptionId
 }
 else {
     try {
         Set-AzContext -Subscription $subscriptionId -Tenant $activeTenantId -ErrorAction Stop | Out-Null
     }
     catch {
-        Write-Host "The Az PowerShell session could not select the subscription. Starting device-code login..." -ForegroundColor Yellow
-        Connect-AzAccount -Tenant $activeTenantId -Subscription $subscriptionId -UseDeviceAuthentication -ErrorAction Stop | Out-Null
+        Write-Host "The Az PowerShell session could not select the subscription. Starting browser login with WAM disabled for this process..." -ForegroundColor Yellow
+        Connect-AzBrowserAccount -Tenant $activeTenantId -Subscription $subscriptionId
     }
 }
 
