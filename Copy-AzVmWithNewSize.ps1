@@ -39,6 +39,10 @@ VM selection prompts for a value when this parameter is omitted.
 Optional Azure subscription name or ID. The active Azure CLI subscription is
 used when omitted.
 
+.PARAMETER TenantId
+Optional Microsoft Entra tenant ID used for Azure CLI login. Specify this for
+accounts that can access multiple tenants to avoid cross-tenant discovery.
+
 .PARAMETER EnableAcceleratedNetworking
 Enables accelerated networking on each new NIC. Use only when the target VM
 size and operating system support it.
@@ -59,6 +63,12 @@ Endpoint preparation. Required for noninteractive Windows generalization.
 
 .EXAMPLE
 .\Copy-AzVmWithNewSize.ps1 -ResourceGroupName lab-rg -TargetVmSize Standard_D4s_v5
+
+.EXAMPLE
+.\Copy-AzVmWithNewSize.ps1 -SubscriptionId 00000000-0000-0000-0000-000000000000 -TenantId 11111111-1111-1111-1111-111111111111
+
+Uses tenant-scoped device-code authentication when the existing Azure CLI
+session is invalid.
 
 .EXAMPLE
 .\Copy-AzVmWithNewSize.ps1
@@ -96,6 +106,8 @@ param(
     [string]$SourceVmSize,
 
     [string]$SubscriptionId,
+
+    [string]$TenantId,
 
     [switch]$EnableAcceleratedNetworking,
 
@@ -481,12 +493,24 @@ foreach ($commandName in @("az", "Connect-AzAccount", "Get-AzResourceGroup", "Ge
     }
 }
 
-$null = az account get-access-token --output none 2>$null
+$tokenCheckArguments = @("account", "get-access-token", "--output", "none")
+if (-not [string]::IsNullOrWhiteSpace($SubscriptionId)) {
+    $tokenCheckArguments += @("--subscription", $SubscriptionId)
+}
+$null = & az @tokenCheckArguments 2>$null
 if ($LASTEXITCODE -ne 0) {
-    Write-Host "No valid Azure CLI session was found. Starting az login..." -ForegroundColor Yellow
-    az login
+    Write-Host "No valid Azure CLI session was found. Starting device-code login..." -ForegroundColor Yellow
+    $loginArguments = @("login", "--use-device-code")
+    if (-not [string]::IsNullOrWhiteSpace($TenantId)) {
+        $loginArguments += @("--tenant", $TenantId)
+    }
+    if (-not [string]::IsNullOrWhiteSpace($SubscriptionId) -and -not [string]::IsNullOrWhiteSpace($TenantId)) {
+        $loginArguments += @("--subscription", $SubscriptionId)
+    }
+    & az @loginArguments
     if ($LASTEXITCODE -ne 0) {
-        throw "Azure CLI login failed."
+        $tenantGuidance = if ([string]::IsNullOrWhiteSpace($TenantId)) { " Specify -TenantId to limit login to the tenant containing the subscription." } else { "" }
+        throw "Azure CLI device-code login failed.$tenantGuidance"
     }
 }
 
