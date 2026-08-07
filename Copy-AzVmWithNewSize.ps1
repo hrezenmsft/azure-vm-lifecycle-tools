@@ -67,8 +67,7 @@ Endpoint preparation. Required for noninteractive Windows generalization.
 .EXAMPLE
 .\Copy-AzVmWithNewSize.ps1 -SubscriptionId 00000000-0000-0000-0000-000000000000 -TenantId 11111111-1111-1111-1111-111111111111
 
-Uses tenant-scoped device-code authentication when the existing Azure CLI
-session is invalid.
+Requires an existing tenant-scoped Azure CLI session.
 
 .EXAMPLE
 .\Copy-AzVmWithNewSize.ps1
@@ -499,19 +498,8 @@ if (-not [string]::IsNullOrWhiteSpace($SubscriptionId)) {
 }
 $null = & az @tokenCheckArguments 2>$null
 if ($LASTEXITCODE -ne 0) {
-    Write-Host "No valid Azure CLI session was found. Starting device-code login..." -ForegroundColor Yellow
-    $loginArguments = @("login", "--use-device-code")
-    if (-not [string]::IsNullOrWhiteSpace($TenantId)) {
-        $loginArguments += @("--tenant", $TenantId)
-    }
-    if (-not [string]::IsNullOrWhiteSpace($SubscriptionId) -and -not [string]::IsNullOrWhiteSpace($TenantId)) {
-        $loginArguments += @("--subscription", $SubscriptionId)
-    }
-    & az @loginArguments
-    if ($LASTEXITCODE -ne 0) {
-        $tenantGuidance = if ([string]::IsNullOrWhiteSpace($TenantId)) { " Specify -TenantId to limit login to the tenant containing the subscription." } else { "" }
-        throw "Azure CLI device-code login failed.$tenantGuidance"
-    }
+    $loginCommand = if ([string]::IsNullOrWhiteSpace($TenantId)) { "az login" } else { "az login --tenant `"$TenantId`"" }
+    throw "No valid Azure CLI session was found. Run '$loginCommand', select the required subscription, and then run this script again."
 }
 
 if (-not [string]::IsNullOrWhiteSpace($SubscriptionId)) {

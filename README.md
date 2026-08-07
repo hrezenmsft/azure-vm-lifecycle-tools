@@ -177,15 +177,17 @@ Run without parameters for guided numbered menus:
 .\Copy-AzVmWithNewSize.ps1
 ```
 
-When the existing Azure CLI session is invalid, the script uses device-code authentication to avoid Windows broker/MSAL cache failures. For accounts with access to multiple tenants, pass both the subscription and its Microsoft Entra tenant ID so login does not probe unrelated tenants:
+The script does not start Azure CLI authentication. Run `az login` first. For accounts with access to multiple tenants, authenticate to the tenant containing the subscription:
 
 ```powershell
+az login --tenant "<tenant-id>"
+
 .\Copy-AzVmWithNewSize.ps1 `
     -SubscriptionId "<subscription-id>" `
     -TenantId "<tenant-id>"
 ```
 
-Follow the displayed device-code instructions in a browser. `-TenantId` is optional but recommended for multi-tenant accounts.
+If the Azure CLI session is missing or expired, the script stops and prints the required login command. `-TenantId` is optional but recommended for multi-tenant accounts.
 
 The script prompts for:
 

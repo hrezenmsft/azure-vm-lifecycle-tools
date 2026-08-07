@@ -344,11 +344,7 @@ else {
 
 $null = az account get-access-token --output none 2>$null
 if ($LASTEXITCODE -ne 0) {
-    Write-Host "No valid Azure CLI session was found. Starting az login..." -ForegroundColor Yellow
-    az login
-    if ($LASTEXITCODE -ne 0) {
-        throw "Azure CLI login failed."
-    }
+    throw "No valid Azure CLI session was found. Run 'az login', select the required subscription, and then run this script again."
 }
 
 if (-not [string]::IsNullOrWhiteSpace($SubscriptionId)) {
