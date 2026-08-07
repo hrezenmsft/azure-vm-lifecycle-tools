@@ -126,6 +126,15 @@ Preview every eligible archived blob in a selected storage account:
 .\Start-AzBlobRehydration.ps1 -WhatIf
 ```
 
+When an Azure CLI or Az PowerShell session is invalid, the script uses device-code authentication to avoid Windows broker/MSAL cache failures. For multi-tenant accounts, scope both authentication systems to the correct tenant and subscription:
+
+```powershell
+.\Start-AzBlobRehydration.ps1 `
+    -SubscriptionId "<subscription-id>" `
+    -TenantId "<tenant-id>" `
+    -WhatIf
+```
+
 Rehydrate one container to Cool with Standard priority:
 
 ```powershell

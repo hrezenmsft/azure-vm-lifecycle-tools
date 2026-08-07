@@ -44,11 +44,22 @@ The default is zero.
 Optional Azure subscription name or ID. The active Azure CLI subscription is
 used when omitted.
 
+.PARAMETER TenantId
+Optional Microsoft Entra tenant ID used for Azure CLI and Az PowerShell login.
+Specify this for accounts that can access multiple tenants to avoid
+cross-tenant discovery.
+
 .EXAMPLE
 .\Start-AzBlobRehydration.ps1 -WhatIf
 
 Selects a storage account, scans every container, and previews the rehydration
 request without changing blob tiers.
+
+.EXAMPLE
+.\Start-AzBlobRehydration.ps1 -SubscriptionId 00000000-0000-0000-0000-000000000000 -TenantId 11111111-1111-1111-1111-111111111111 -WhatIf
+
+Uses tenant-scoped device-code authentication when an Azure session is invalid,
+then previews eligible blobs in the selected subscription.
 
 .EXAMPLE
 .\Start-AzBlobRehydration.ps1 -ResourceGroupName archive-rg -StorageAccountName archivestore01 -ContainerName backups -TargetTier Cool -RehydratePriority Standard
@@ -91,7 +102,9 @@ param(
     [ValidateRange(0, [int]::MaxValue)]
     [int]$MaxBlobCount = 0,
 
-    [string]$SubscriptionId
+    [string]$SubscriptionId,
+
+    [string]$TenantId
 )
 
 function Select-MenuItem {
@@ -167,12 +180,24 @@ foreach ($commandName in $requiredCommands) {
     }
 }
 
-$null = az account get-access-token --output none 2>$null
+$tokenCheckArguments = @("account", "get-access-token", "--output", "none")
+if (-not [string]::IsNullOrWhiteSpace($SubscriptionId)) {
+    $tokenCheckArguments += @("--subscription", $SubscriptionId)
+}
+$null = & az @tokenCheckArguments 2>$null
 if ($LASTEXITCODE -ne 0) {
-    Write-Host "No valid Azure CLI session was found. Starting az login..." -ForegroundColor Yellow
-    az login
+    Write-Host "No valid Azure CLI session was found. Starting device-code login..." -ForegroundColor Yellow
+    $loginArguments = @("login", "--use-device-code")
+    if (-not [string]::IsNullOrWhiteSpace($TenantId)) {
+        $loginArguments += @("--tenant", $TenantId)
+    }
+    if (-not [string]::IsNullOrWhiteSpace($SubscriptionId) -and -not [string]::IsNullOrWhiteSpace($TenantId)) {
+        $loginArguments += @("--subscription", $SubscriptionId)
+    }
+    & az @loginArguments
     if ($LASTEXITCODE -ne 0) {
-        throw "Azure CLI login failed."
+        $tenantGuidance = if ([string]::IsNullOrWhiteSpace($TenantId)) { " Specify -TenantId to limit login to the tenant containing the subscription." } else { "" }
+        throw "Azure CLI device-code login failed.$tenantGuidance"
     }
 }
 
@@ -189,13 +214,22 @@ if ($LASTEXITCODE -ne 0 -or -not $azAccount.id) {
 }
 $subscriptionId = [string]$azAccount.id
 $subscriptionLabel = "$($azAccount.name) ($subscriptionId)"
+$activeTenantId = [string]$azAccount.tenantId
 
 $azPowerShellContext = Get-AzContext -ErrorAction SilentlyContinue
-if ($null -eq $azPowerShellContext -or $null -eq $azPowerShellContext.Account) {
-    Write-Host "No Az PowerShell session was found. Starting Connect-AzAccount..." -ForegroundColor Yellow
-    Connect-AzAccount -Subscription $subscriptionId -ErrorAction Stop | Out-Null
+if ($null -eq $azPowerShellContext -or $null -eq $azPowerShellContext.Account -or [string]$azPowerShellContext.Tenant.Id -ine $activeTenantId) {
+    Write-Host "No matching Az PowerShell session was found. Starting device-code login..." -ForegroundColor Yellow
+    Connect-AzAccount -Tenant $activeTenantId -Subscription $subscriptionId -UseDeviceAuthentication -ErrorAction Stop | Out-Null
 }
-Set-AzContext -Subscription $subscriptionId -ErrorAction Stop | Out-Null
+else {
+    try {
+        Set-AzContext -Subscription $subscriptionId -Tenant $activeTenantId -ErrorAction Stop | Out-Null
+    }
+    catch {
+        Write-Host "The Az PowerShell session could not select the subscription. Starting device-code login..." -ForegroundColor Yellow
+        Connect-AzAccount -Tenant $activeTenantId -Subscription $subscriptionId -UseDeviceAuthentication -ErrorAction Stop | Out-Null
+    }
+}
 
 $storageAccounts = @(Get-AzStorageAccount -ErrorAction Stop)
 if (-not [string]::IsNullOrWhiteSpace($ResourceGroupName)) {
