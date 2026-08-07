@@ -29,6 +29,8 @@ az login
 az account set --subscription "<subscription-name-or-id>"
 ```
 
+Every script verifies the Azure CLI session before doing work. If the session is missing or expired, the script stops and instructs you to run `az login`; no script starts Azure CLI authentication automatically. For multi-tenant accounts, use `az login --tenant "<tenant-id>"` before selecting the subscription.
+
 ## Import a VHD or VHDX
 
 ### Additional requirements

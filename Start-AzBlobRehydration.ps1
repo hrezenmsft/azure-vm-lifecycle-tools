@@ -13,6 +13,9 @@ Rehydration can incur data retrieval, transaction, online storage, and early
 deletion charges. High-priority retrieval costs more than Standard priority.
 The operation cannot be canceled after Azure accepts the tier change.
 
+An active Azure CLI session is required. The script never runs az login; if the
+session is missing or expired, it stops and prints the required login command.
+
 .PARAMETER ResourceGroupName
 Resource group containing the storage account. When omitted, the script lists
 storage accounts in the selected subscription and derives the resource group

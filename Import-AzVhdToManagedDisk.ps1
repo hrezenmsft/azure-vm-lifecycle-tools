@@ -9,6 +9,9 @@ SAS. VHDX inputs are converted to a temporary fixed VHD before upload. The
 active Azure CLI subscription is used unless SubscriptionId is supplied. The
 script must be run from an elevated PowerShell session.
 
+An active Azure CLI session is required. The script never runs az login; if the
+session is missing or expired, it stops and instructs the user to run az login.
+
 .PARAMETER Path
 Path to an existing local fixed-size .vhd or .vhdx file. Relative and absolute
 paths are accepted. VHDX conversion requires the Hyper-V PowerShell module.

@@ -16,6 +16,9 @@ Progress is reported against counted workflow steps. If a source VM fails, the
 script displays the failure reason, skips its remaining clone plans, performs
 best-effort cleanup, and continues with the next selected source VM.
 
+An active Azure CLI session is required. The script never runs az login; if the
+session is missing or expired, it stops and prints the required login command.
+
 .PARAMETER ResourceGroupName
 Resource group containing the source VMs and receiving the cloned VMs.
 
