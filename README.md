@@ -12,6 +12,7 @@ PowerShell tools for Azure VM lifecycle operations and archived blob rehydration
 | --- | --- |
 | `Import-AzVhdToManagedDisk.ps1` | Upload a local fixed-size VHD or VHDX into a new Azure managed disk. |
 | `Copy-AzVmWithNewSize.ps1` | Clone selected VMs in a resource group using a different VM size. |
+| `Convert-AzZonalVmToRegional.ps1` | Replace a zonal VM with a regional VM by recreating its managed disks without zones and reusing its NICs. |
 | `Start-AzBlobRehydration.ps1` | Rehydrate archived blobs to the Hot or Cool access tier. |
 
 All scripts support `-WhatIf` and confirmation prompts because they create resources or submit billable operations.
@@ -257,6 +258,100 @@ Preview cloning every VM in a resource group:
 
 ```powershell
 .\Copy-AzVmWithNewSize.ps1 -ResourceGroupName lab-rg -TargetVmSize Standard_D4s_v5 -WhatIf
+```
+
+## Convert a zonal VM to regional
+
+### Additional requirements
+
+- Az PowerShell modules: `Az.Accounts`, `Az.Compute`, and `Az.Resources`.
+- Permission to stop/delete the source VM and create replacement disks, snapshots, and the new VM.
+- A zonal VM that uses managed disks.
+- A maintenance window, because the source VM is stopped, deleted, and recreated with the same name.
+
+```powershell
+Install-Module Az.Accounts, Az.Compute, Az.Resources -Scope CurrentUser
+```
+
+Run without parameters for guided numbered menus:
+
+```powershell
+.\Convert-AzZonalVmToRegional.ps1
+```
+
+The script does not start Azure CLI authentication. Run `az login` first. For accounts with access to multiple tenants, authenticate to the tenant containing the subscription:
+
+```powershell
+az login --tenant "<tenant-id>"
+
+.\Convert-AzZonalVmToRegional.ps1 `
+    -SubscriptionId "<subscription-id>" `
+    -TenantId "<tenant-id>"
+```
+
+If the Azure CLI session is missing or expired, the script stops and prints the required login command. `-TenantId` is optional but recommended for multi-tenant accounts.
+
+The script prompts for:
+
+1. Source resource group.
+2. Source zonal VM.
+
+Each menu displays the active Azure subscription name and ID at the top. The VM picker lists only zonal VMs in the selected resource group and also supports manual entry.
+
+Preview the conversion:
+
+```powershell
+.\Convert-AzZonalVmToRegional.ps1 `
+    -ResourceGroupName prod-rg `
+    -VmName app01 `
+    -WhatIf
+```
+
+Convert a zonal VM and keep its current size:
+
+```powershell
+.\Convert-AzZonalVmToRegional.ps1 `
+    -ResourceGroupName prod-rg `
+    -VmName app01
+```
+
+Convert a zonal VM and change the VM size during recreation:
+
+```powershell
+.\Convert-AzZonalVmToRegional.ps1 `
+    -ResourceGroupName prod-rg `
+    -VmName app01 `
+    -TargetVmSize Standard_D4s_v5
+```
+
+Convert a zonal VM and force the replacement disks to a target SKU:
+
+```powershell
+.\Convert-AzZonalVmToRegional.ps1 `
+    -ResourceGroupName prod-rg `
+    -VmName app01 `
+    -TargetDiskSkuName Premium_LRS
+```
+
+Keep the temporary snapshots for a rollback window:
+
+```powershell
+.\Convert-AzZonalVmToRegional.ps1 `
+    -ResourceGroupName prod-rg `
+    -VmName app01 `
+    -KeepSnapshots
+```
+
+The script snapshots the source OS disk and every attached data disk, creates new regional managed disks by intentionally omitting zone assignment, stops the source VM if needed, updates delete options to detach NICs and disks, deletes the source VM object, and recreates the VM with the same name. It preserves attached NICs, boot diagnostics configuration, license type, marketplace plan metadata, security profile, tags, and data-disk LUN and caching settings where Azure allows them on the replacement VM.
+
+This is an in-place replacement, not an online migration. The original VM resource is deleted, and the original managed disks remain detached after recreation so you can validate the replacement VM before manual cleanup. If `-KeepSnapshots` is omitted, temporary snapshots are removed automatically after successful completion.
+
+The script warns if the VM is not marked zonal at the VM resource level, but it still continues so you can handle cases where zonal behavior is represented primarily by the attached disks. Review the confirmation summary carefully, because `-TargetVmName` is reserved and the script always recreates the VM with the original name.
+
+After validation, manually remove the original source disks and any retained snapshots listed in the cleanup summary to avoid ongoing charges.
+
+```powershell
+Get-Help .\Convert-AzZonalVmToRegional.ps1 -Full
 ```
 
 Clone only VMs at a specific source size:
