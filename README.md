@@ -13,6 +13,7 @@ PowerShell tools for Azure VM lifecycle operations and archived blob rehydration
 | `Import-AzVhdToManagedDisk.ps1` | Upload a local fixed-size VHD or VHDX into a new Azure managed disk. |
 | `Copy-AzVmWithNewSize.ps1` | Clone selected VMs in a resource group using a different VM size. |
 | `Convert-AzZonalVmToRegional.ps1` | Replace a zonal VM with a regional VM by recreating its managed disks without zones and reusing its NICs. |
+| `Get-AzVmPlacementInventory.ps1` | Inventory VM placement by name, region, and zonal/regional state (including zone values). |
 | `Start-AzBlobRehydration.ps1` | Rehydrate archived blobs to the Hot or Cool access tier. |
 
 All scripts support `-WhatIf` and confirmation prompts because they create resources or submit billable operations.
@@ -379,6 +380,39 @@ Specialized clones receive an OS disk copied from the shared source snapshot. Ge
 
 ```powershell
 Get-Help .\Copy-AzVmWithNewSize.ps1 -Full
+```
+
+## Inventory VM placement
+
+Generate a VM inventory that shows each VM name, region, whether it is zonal
+or regional, and the zone values when present.
+
+The final report is rendered once as a single table with these columns:
+`Name`, `ResourceGroupName`, `Region`, `Placement`, and `Zone`.
+
+Run with guided menus:
+
+```powershell
+.\Get-AzVmPlacementInventory.ps1
+```
+
+Inventory one resource group:
+
+```powershell
+.\Get-AzVmPlacementInventory.ps1 -ResourceGroupName lab-rg
+```
+
+Inventory all resource groups in the active subscription:
+
+```powershell
+.\Get-AzVmPlacementInventory.ps1 -AllResourceGroups
+```
+
+Like other tools in this repository, this script expects a valid Azure CLI
+session and does not run `az login` for you.
+
+```powershell
+Get-Help .\Get-AzVmPlacementInventory.ps1 -Full
 ```
 
 ## Security and cost
